@@ -12,15 +12,20 @@ import (
 
 type LoadRequestor struct {
     Requests []string // one request per Requestor, each request is a URL with parameters
+    Headers  map[string]string
 }
 
-func NewLoadRequestor(requests []string) (lr *LoadRequestor) {
-    return &LoadRequestor{
+func NewLoadRequestor(requests []string, headersA ...map[string]string) (lr *LoadRequestor) {
+    lr = &LoadRequestor{
         Requests: requests,
     }
+    if len(headersA) != 0 {
+        lr.Headers = headersA[0]
+    }
+    return
 }
 
-func (lr *LoadRequestor) SubmitWorkLoop() {
+func (lr *LoadRequestor) SubmitWorkLoop(printResultsA ...bool) {
     var (
         workerChan    = make(chan Response, len(lr.Requests))
         sigChan       = make(chan os.Signal)
@@ -29,11 +34,16 @@ func (lr *LoadRequestor) SubmitWorkLoop() {
         // Limit the rate to 10/second
         rate_limit    = 10
         rate_duration = time.Duration(float64(1000/rate_limit)) * time.Millisecond
+        printResults  bool
     )
+    if len(printResultsA) != 0 {
+        printResults = printResultsA[0]
+    }
     signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
+    fmt.Printf("starting worker loop, CTRL-C or other signal to stop\n")
     // submit work initially for all requests
     for id, url := range lr.Requests {
-        go WebRequest(id, url, workerChan)
+        go WebRequest(id, url, lr.Headers, workerChan)
     }
     startTime = time.Now()
     startLoop := time.Now()
@@ -46,9 +56,11 @@ func (lr *LoadRequestor) SubmitWorkLoop() {
                 }
                 finishedCount++
                 id := result.ID
-                // fmt.Printf("id: %d, result: [%s]\n", result.ID, result.Result)
+                if printResults {
+                    fmt.Printf("id: %d, result: [%s]\n", result.ID, result.Result)
+                }
                 startTime = time.Now()
-                go WebRequest(id, lr.Requests[id], workerChan)
+                go WebRequest(id, lr.Requests[id], lr.Headers, workerChan)
             }
         }
     }()
@@ -69,16 +81,20 @@ type Response struct {
     Result string
 }
 
-func WebRequest(requestID int, URL string, workerChan chan Response) {
+func WebRequest(requestID int, URL string, Headers map[string]string, workerChan chan Response) {
     var (
         err  error
         resp *http.Response
         body []byte
     )
-
-    // time.Sleep(time.Second)
-
-    if resp, err = http.Get(URL); err != nil {
+    client := &http.Client{}
+    req, _ := http.NewRequest("GET", URL, nil)
+    if Headers != nil {
+        for key, val := range Headers {
+            req.Header.Set(key, val)
+        }
+    }
+    if resp, err = client.Do(req); err != nil {
         workerChan <- Response{requestID, err.Error()}
     } else {
         defer func() { _ = resp.Body.Close() }()
