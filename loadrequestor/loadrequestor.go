@@ -35,6 +35,7 @@ func (lr *LoadRequestor) SubmitWorkLoop(printResultsA ...bool) {
         rate_limit    = 10
         rate_duration = time.Duration(float64(1000/rate_limit)) * time.Millisecond
         printResults  bool
+        results       = make(map[string]string)
     )
     if len(printResultsA) != 0 {
         printResults = printResultsA[0]
@@ -57,7 +58,16 @@ func (lr *LoadRequestor) SubmitWorkLoop(printResultsA ...bool) {
                 finishedCount++
                 id := result.ID
                 if printResults {
-                    fmt.Printf("id: %d, result: [%s]\n", result.ID, result.Result)
+                    URL := lr.Requests[id]
+                    if val, ok := results[URL]; ok {
+                        if val != result.Result {
+                            fmt.Printf("Differing result[%d]:\n[%s]\n", result.ID, result.Result)
+                            results[URL] = result.Result
+                        }
+                    } else {
+                        fmt.Printf("New result[%d]:\n[%s]\n", result.ID, result.Result)
+                        results[URL] = result.Result
+                    }
                 }
                 startTime = time.Now()
                 go WebRequest(id, lr.Requests[id], lr.Headers, workerChan)
